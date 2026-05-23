@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premium FIRE Calculator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <header>
+            <h1>FIRE Calculator</h1>
+            <p>Financial Independence, Retire Early</p>
+        </header>
+
+        <main class="calculator-grid">
+            <section class="inputs-panel">
+                <h2>Variables</h2>
+
+                <div class="input-group">
+                    <label>Current Age: 40</label> <!-- Fixed display -->
+                    <input type="hidden" id="currentAge" value="40">
+                </div>
+
+                <div class="input-group">
+                    <label for="retirementAge">Retirement Age</label>
+                    <div class="input-row">
+                        <input type="range" id="retirementAgeSlider" min="40" max="65" value="47">
+                        <input type="number" id="retirementAge" min="40" max="65" value="47">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Life Expectancy: 95</label> <!-- Fixed display -->
+                    <input type="hidden" id="deathAge" value="95">
+                </div>
+
+                <div class="input-group">
+                    <label for="brokerageBalance">Brokerage Balance ($)</label>
+                    <div class="input-row">
+                        <input type="range" id="brokerageBalanceSlider" min="0" max="500000" step="5000" value="100000">
+                        <input type="number" id="brokerageBalance" min="0" max="1000000" value="100000">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="retirementBalance">Retirement Balance ($)</label>
+                    <div class="input-row">
+                        <input type="range" id="retirementBalanceSlider" min="0" max="5000000" step="10000"
+                            value="50000">
+                        <input type="number" id="retirementBalance" min="0" max="100000000" value="50000">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="monthlyIncome">Monthly Income ($)</label>
+                    <div class="input-row">
+                        <input type="range" id="monthlyIncomeSlider" min="0" max="50000" step="100" value="10000">
+                        <input type="number" id="monthlyIncome" min="0" max="100000" value="10000">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="monthlyVaDisability">Monthly VA Disability (Tax-Free $)</label>
+                    <div class="input-row">
+                        <input type="range" id="monthlyVaDisabilitySlider" min="0" max="10000" step="100" value="0">
+                        <input type="number" id="monthlyVaDisability" min="0" max="20000" value="0">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="monthlyCoastIncome">Monthly Coast Income ($)</label>
+                    <div class="input-row">
+                        <input type="range" id="monthlyCoastIncomeSlider" min="0" max="20000" step="100" value="0">
+                        <input type="number" id="monthlyCoastIncome" min="0" max="100000" value="0">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="coastEndAge">Coast Income End Age</label>
+                    <div class="input-row">
+                        <input type="range" id="coastEndAgeSlider" min="18" max="100" value="65">
+                        <input type="number" id="coastEndAge" min="18" max="100" value="65">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="savingsAllocation">Savings to Brokerage (%)</label>
+                    <div class="input-row">
+                        <input type="range" id="savingsAllocationSlider" min="0" max="100" step="1" value="50">
+                        <input type="number" id="savingsAllocation" min="0" max="100" value="50">
+                    </div>
+                </div>
+
+                <div class="input-group"
+                    style="flex-direction: row; justify-content: start; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="max401k" style="width: auto;">
+                    <label for="max401k" style="font-weight: normal; margin-bottom: 0;">Max 401k First
+                        ($23.5k/yr)</label>
+                </div>
+
+                <div class="input-group">
+                    <label for="monthlySpending">Monthly Spending ($)</label>
+                    <div class="input-row">
+                        <input type="range" id="monthlySpendingSlider" min="0" max="20000" step="100" value="7000">
+                        <input type="number" id="monthlySpending" min="0" max="100000" value="7000">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="returnPre">Return Pre-Retirement (%)</label>
+                    <div class="input-row">
+                        <input type="range" id="returnPreSlider" min="0" max="15" step="0.1" value="7">
+                        <input type="number" id="returnPre" min="0" max="20" step="0.1" value="7">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="returnPost">Return Post-Retirement (%)</label>
+                    <div class="input-row">
+                        <input type="range" id="returnPostSlider" min="0" max="15" step="0.1" value="5">
+                        <input type="number" id="returnPost" min="0" max="20" step="0.1" value="5">
+                    </div>
+                </div>
+            </section>
+
+            <section class="results-panel">
+                <div class="summary-cards">
+                    <div class="card">
+                        <h3>FIRE Number</h3>
+                        <div class="value" id="fireNumberValue">-</div>
+                        <div class="subtext">Based on 4% rule (25x expenses)</div>
+                    </div>
+                    <div class="card">
+                        <h3>Years to FI</h3>
+                        <div class="value" id="yearsToFiValue">-</div>
+                        <div class="subtext">From current age</div>
+                    </div>
+                    <div class="card" id="successCard">
+                        <h3>Status</h3>
+                        <div class="value" id="successValue">-</div>
+                        <div class="subtext" id="successSubtext"></div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="fireChart"></canvas>
+                </div>
+
+                <div class="metrics-details">
+                    <!-- Additional detailed metrics could go here -->
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+
+</html>
