@@ -1,4 +1,5 @@
 import copy
+import json
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -11,23 +12,41 @@ from events import (
     EVENT_TYPES,
     resolve_ages,
 )
+from monte_carlo import run_monte_carlo
+
+_CFG_DEFAULTS = {
+    "current_age":           CURRENT_AGE,
+    "death_age":             DEATH_AGE,
+    "retirement_age":        47,
+    "brokerage_balance":     100_000,
+    "retirement_balance":    400_000,
+    "return_pre":            7.0,
+    "return_post":           5.0,
+    "early_withdrawal_rate": 35.0,
+}
 
 st.set_page_config(page_title="FIRE Calculator", layout="wide")
 st.title("FIRE Calculator")
 st.markdown(
-    "Event-driven Financial Independence / Retire Early simulator. "
+    "Event-driven retirement financial simulator. "
     "Every financial flow — income, expenses, savings — is an **event** on the timeline."
 )
 
 # ── Session State ──────────────────────────────────────────────────────────────
+if "_cfg" not in st.session_state:
+    st.session_state._cfg = dict(_CFG_DEFAULTS)
+if "_settings_version" not in st.session_state:
+    st.session_state._settings_version = 0
+
+_cfg = st.session_state._cfg
+_v   = st.session_state._settings_version   # widget key suffix — incremented on import
+
 if "events" not in st.session_state:
     st.session_state.events = copy.deepcopy(DEFAULT_EVENTS)
 if "editing_idx" not in st.session_state:
     st.session_state.editing_idx = None
 if "adding" not in st.session_state:
     st.session_state.adding = False
-if "scenarios" not in st.session_state:
-    st.session_state.scenarios = []
 
 events = st.session_state.events  # live reference — mutations update session state
 
@@ -36,26 +55,39 @@ with st.sidebar:
     st.header("Global Settings")
 
     st.subheader("Age Range")
-    current_age = st.number_input("Current Age", min_value=1,  max_value=80,  value=CURRENT_AGE, step=1)
-    death_age   = st.number_input("Life Expectancy", min_value=50, max_value=120, value=DEATH_AGE,   step=1)
+    current_age = st.number_input("Current Age", min_value=1, max_value=80,
+                                  value=int(_cfg.get("current_age", CURRENT_AGE)), step=1,
+                                  key=f"current_age_{_v}")
+    death_age   = st.number_input("Life Expectancy", min_value=50, max_value=120,
+                                  value=int(_cfg.get("death_age", DEATH_AGE)), step=1,
+                                  key=f"death_age_{_v}")
+    _ret_default = max(int(current_age), min(int(min(80, death_age)), int(_cfg.get("retirement_age", 47))))
     retirement_age = st.slider(
         "Retirement Age",
         min_value=int(current_age),
         max_value=int(min(80, death_age)),
-        value=min(47, int(death_age)),
+        value=_ret_default,
+        key=f"retirement_age_{_v}",
     )
 
     st.subheader("Starting Balances")
-    brokerage_balance = st.number_input("Brokerage Balance ($)", min_value=0, value=100_000, step=1_000)
-    retirement_balance = st.number_input("Retirement Balance ($)", min_value=0, value=400_000, step=1_000)
+    brokerage_balance  = st.number_input("Brokerage Balance ($)",  min_value=0,
+                                         value=int(_cfg.get("brokerage_balance",  100_000)), step=1_000,
+                                         key=f"brokerage_{_v}")
+    retirement_balance = st.number_input("Retirement Balance ($)", min_value=0,
+                                         value=int(_cfg.get("retirement_balance", 400_000)), step=1_000,
+                                         key=f"retirement_{_v}")
 
     st.subheader("Growth Rates")
-    return_pre  = st.slider("Pre-Retirement Return (%)",  0.0, 12.0, 7.0, 0.1) / 100
-    return_post = st.slider("Post-Retirement Return (%)", 0.0, 12.0, 5.0, 0.1) / 100
+    return_pre  = st.slider("Pre-Retirement Return (%)",  0.0, 12.0,
+                            float(_cfg.get("return_pre",  7.0)), 0.1, key=f"return_pre_{_v}") / 100
+    return_post = st.slider("Post-Retirement Return (%)", 0.0, 12.0,
+                            float(_cfg.get("return_post", 5.0)), 0.1, key=f"return_post_{_v}") / 100
 
     st.subheader("Early Withdrawal")
     early_withdrawal_rate = st.slider(
-        "Early Withdrawal Rate (%)", 0, 50, 35, 1,
+        "Early Withdrawal Rate (%)", 0, 50, int(_cfg.get("early_withdrawal_rate", 35)), 1,
+        key=f"ewr_{_v}",
         help=(
             "Combined IRS 10% penalty + estimated income tax on retirement account "
             "withdrawals before age 60 (59½ rule). Applied only when brokerage is "
@@ -63,17 +95,44 @@ with st.sidebar:
         ),
     ) / 100
 
-    st.subheader("Scenario Manager")
-    scenario_name = st.text_input("Scenario Name (e.g. 'Retire 50')")
-    sc1, sc2 = st.columns(2)
-    if sc1.button("Save Scenario"):
-        if scenario_name:
-            st.session_state.save_trigger = True
-            st.session_state.save_name = scenario_name
-        else:
-            st.error("Enter a name.")
-    if sc2.button("Clear All"):
-        st.session_state.scenarios = []
+    st.divider()
+    st.subheader("Settings")
+
+    # ── Export ────────────────────────────────────────────────────────────────
+    _export_data = {
+        "current_age":           int(current_age),
+        "death_age":             int(death_age),
+        "retirement_age":        retirement_age,
+        "brokerage_balance":     int(brokerage_balance),
+        "retirement_balance":    int(retirement_balance),
+        "return_pre":            round(return_pre  * 100, 1),
+        "return_post":           round(return_post * 100, 1),
+        "early_withdrawal_rate": round(early_withdrawal_rate * 100, 1),
+        "events":                events,
+    }
+    st.download_button(
+        "⬇ Export Settings",
+        data=json.dumps(_export_data, indent=2),
+        file_name="my_plan.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
+    # ── Import ────────────────────────────────────────────────────────────────
+    uploaded = st.file_uploader("Import Settings", type=["json"], label_visibility="collapsed")
+    if uploaded is not None:
+        _file_hash = hash(uploaded.getvalue())
+        if st.session_state.get("_last_import_hash") != _file_hash:
+            try:
+                _imported = json.loads(uploaded.getvalue())
+                st.session_state._cfg = {**_CFG_DEFAULTS, **_imported}
+                st.session_state.events = _imported.get("events", copy.deepcopy(DEFAULT_EVENTS))
+                st.session_state._settings_version += 1
+                st.session_state._last_import_hash = _file_hash
+                st.rerun()
+            except Exception as _e:
+                st.error(f"Invalid settings file: {_e}")
+
 
 
 # ── Helper: event form ─────────────────────────────────────────────────────────
@@ -276,41 +335,24 @@ for i, ev in enumerate(events):
 
 
 # ── Calculate ──────────────────────────────────────────────────────────────────
+_resolved_events = resolve_ages(events, retirement_age, int(death_age))
 data = calculate_fire(
-    resolve_ages(events, retirement_age, int(death_age)),
+    _resolved_events,
     brokerage_balance, retirement_balance,
     retirement_age, return_pre, return_post, early_withdrawal_rate,
     current_age=int(current_age), death_age=int(death_age),
 )
 df = data["df"]
 
-if st.session_state.get("save_trigger"):
-    st.session_state.scenarios.append({
-        "name": st.session_state.save_name,
-        "df": df.copy(),
-        "fire_number": data["fire_number"],
-    })
-    st.session_state.save_trigger = False
-    st.rerun()
-
 
 # ── Metrics ────────────────────────────────────────────────────────────────────
 st.divider()
-m1, m2, m3 = st.columns(3)
-m1.metric("FIRE Number", f"${data['fire_number']:,.0f}")
-
-fi_display = (
-    "Already FI" if data["fi_age"] == int(current_age)
-    else (str(data["fi_age"]) if data["fi_age"] else "Never")
-)
-m2.metric("Projected FI Age", fi_display)
-
-status_label = "✅ Success" if data["success"] else "⚠️ Depleted"
-m3.metric("Simulation Status", status_label, f"Ending Balance: ${data['final_amount']:,.0f}")
+status_label = "✅ Funded through life expectancy" if data["success"] else "⚠️ Funds depleted before life expectancy"
+st.metric("Simulation Status", status_label, f"Ending Balance: ${data['final_amount']:,.0f}")
 
 
 # ── Charts ─────────────────────────────────────────────────────────────────────
-tab_nw, tab_cf, tab_timeline = st.tabs(["Net Worth", "Cash Flows", "Event Timeline"])
+tab_nw, tab_cf, tab_timeline, tab_mc = st.tabs(["Net Worth", "Cash Flows", "Event Timeline", "Monte Carlo"])
 
 # ── Net Worth ──────────────────────────────────────────────────────────────────
 with tab_nw:
@@ -328,24 +370,8 @@ with tab_nw:
         line=dict(color="#818cf8", width=1),
     ))
 
-    sc_colors = ["#f59e0b", "#ec4899", "#8b5cf6", "#10b981", "#ef4444"]
-    for i, sc in enumerate(st.session_state.scenarios):
-        fig_nw.add_trace(go.Scatter(
-            x=sc["df"]["Age"], y=sc["df"]["Total"],
-            name=f"Scenario: {sc['name']}",
-            mode="lines",
-            line=dict(color=sc_colors[i % len(sc_colors)], width=3),
-        ))
-
-    fig_nw.add_trace(go.Scatter(
-        x=df["Age"], y=df["Goal"], name="FIRE Goal",
-        line=dict(color="#4ade80", width=2, dash="dash"),
-    ))
     fig_nw.add_vline(x=retirement_age, line_width=2, line_dash="dash", line_color="#f472b6",
                      annotation_text="Retirement", annotation_position="top left")
-    if data["fi_age"] and data["fi_age"] != int(current_age):
-        fig_nw.add_vline(x=data["fi_age"], line_width=2, line_dash="dot", line_color="#facc15",
-                         annotation_text="FI Achieved", annotation_position="bottom right")
     fig_nw.update_layout(
         title="Net Worth Projection",
         xaxis_title="Age", yaxis_title="Balance ($)",
@@ -354,16 +380,6 @@ with tab_nw:
     )
     st.plotly_chart(fig_nw, use_container_width=True)
 
-    if st.session_state.scenarios:
-        with st.expander("Scenario Comparison"):
-            st.table([
-                {
-                    "Name": sc["name"],
-                    "Final Net Worth": f"${sc['df']['Total'].iloc[-1]:,.0f}",
-                    "FIRE Number": f"${sc['fire_number']:,.0f}",
-                }
-                for sc in st.session_state.scenarios
-            ])
 
 # ── Cash Flows ─────────────────────────────────────────────────────────────────
 with tab_cf:
@@ -426,7 +442,7 @@ with tab_timeline:
         fig_gantt = go.Figure()
         seen_types: set = set()
 
-        for ev in events:
+        for ev in _resolved_events:
             type_str = str(ev.get("type", "expense"))
             color    = EVENT_TYPE_COLORS.get(type_str, "#888")
             label    = EVENT_TYPE_LABELS.get(type_str, type_str)
@@ -472,10 +488,6 @@ with tab_timeline:
         fig_gantt.add_vline(x=retirement_age, line_width=2, line_dash="dash",
                             line_color="#f472b6", annotation_text="Retirement",
                             annotation_position="top right")
-        if data["fi_age"] and data["fi_age"] != int(current_age):
-            fig_gantt.add_vline(x=data["fi_age"], line_width=2, line_dash="dot",
-                                line_color="#facc15", annotation_text="FI",
-                                annotation_position="bottom right")
 
         fig_gantt.update_layout(
             barmode="overlay",
@@ -492,9 +504,139 @@ with tab_timeline:
 # ── Simulation Details ─────────────────────────────────────────────────────────
 with st.expander("Simulation Details (Year-by-Year)"):
     money_cols = [
-        "Brokerage", "Retirement", "Total", "Goal",
+        "Brokerage", "Retirement", "Total",
         "Mo Income", "Mo Expenses", "Mo Ret Contrib", "Mo Brk Contrib",
         "Mo Net Budget", "Mo Penalty",
     ]
     fmt = {c: "${:,.0f}" for c in money_cols}
     st.dataframe(df.style.format(fmt), use_container_width=True)
+
+
+# ── Monte Carlo ────────────────────────────────────────────────────────────────
+with tab_mc:
+    st.caption(
+        "Samples portfolio returns each year from a normal distribution. "
+        "Event rates are sampled once per simulation (a persistently different "
+        "inflation or growth rate for the full horizon). "
+        "The base scenario line uses your exact sidebar values."
+    )
+
+    ctrl, results_col = st.columns([1, 2])
+
+    with ctrl:
+        n_sims = st.slider("Simulations", 100, 2000, 500, 100)
+        return_floor_pct = st.slider("Annual return floor (%)", -80, 0, -50, 5)
+        return_floor = return_floor_pct / 100
+
+        st.markdown("**Portfolio Returns**")
+        vary_pre  = st.checkbox("Pre-retirement return",  value=True)
+        pre_std   = st.number_input("Std dev (%/yr)", 0.1, 30.0, 10.0, 0.5,
+                                    key="mc_pre_std",  disabled=not vary_pre)
+        vary_post = st.checkbox("Post-retirement return", value=True)
+        post_std  = st.number_input("Std dev (%/yr)", 0.1, 30.0,  7.0, 0.5,
+                                    key="mc_post_std", disabled=not vary_post)
+
+        _variable_events = [ev for ev in _resolved_events if ev.get("annual_rate", 0) != 0]
+        event_stds: dict = {}
+        if _variable_events:
+            st.markdown("**Event Rates**")
+            for ev in _variable_events:
+                vary_ev = st.checkbox(
+                    f"{ev['name']}  ({ev['annual_rate']:+.1f}%/yr)",
+                    key=f"mc_ev_{ev['name']}",
+                )
+                ev_std = st.number_input(
+                    "Std dev (%/yr)", 0.1, 10.0, 1.0, 0.5,
+                    key=f"mc_evstd_{ev['name']}", disabled=not vary_ev,
+                )
+                if vary_ev:
+                    event_stds[ev["name"]] = ev_std
+
+        st.markdown("")
+        run_btn = st.button("Run Monte Carlo", type="primary", use_container_width=True)
+
+    if run_btn:
+        with results_col:
+            with st.spinner(f"Running {n_sims:,} simulations…"):
+                st.session_state.mc_results = run_monte_carlo(
+                    _resolved_events,
+                    brokerage_balance, retirement_balance,
+                    retirement_age, return_pre, return_post, early_withdrawal_rate,
+                    int(current_age), int(death_age),
+                    n_sims,
+                    (pre_std  / 100) if vary_pre  else 0.0,
+                    (post_std / 100) if vary_post else 0.0,
+                    return_floor,
+                    event_stds,
+                )
+
+    with results_col:
+        mc = st.session_state.get("mc_results")
+        if mc is None:
+            st.info("Configure settings on the left and click **Run Monte Carlo**.")
+        else:
+            pcts = mc["percentiles"]
+            ages_mc = mc["ages"]
+            success_pct = mc["success_rate"] * 100
+
+            color = "#4ade80" if success_pct >= 80 else ("#facc15" if success_pct >= 50 else "#f87171")
+            st.markdown(
+                f"<h2 style='color:{color}; margin:0'>{success_pct:.1f}%</h2>"
+                f"<p style='color:gray; margin:0'>of simulations remain solvent through life expectancy</p>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("")
+
+            # ── Percentile fan chart ───────────────────────────────────────────
+            fig_mc = go.Figure()
+
+            def _band(lo, hi, fill_color, name):
+                x = ages_mc + ages_mc[::-1]
+                y = pcts[hi] + pcts[lo][::-1]
+                fig_mc.add_trace(go.Scatter(
+                    x=x, y=y, fill="toself", fillcolor=fill_color,
+                    line=dict(width=0), name=name, hoverinfo="skip",
+                ))
+
+            _band(10, 90, "rgba(99,110,250,0.12)", "10th – 90th pct")
+            _band(25, 75, "rgba(99,110,250,0.25)", "25th – 75th pct")
+
+            fig_mc.add_trace(go.Scatter(
+                x=ages_mc, y=pcts[50], name="Median (50th)",
+                line=dict(color="#636efa", width=2.5),
+            ))
+            fig_mc.add_trace(go.Scatter(
+                x=df["Age"], y=df["Total"], name="Base scenario",
+                line=dict(color="white", width=1.5, dash="dash"),
+            ))
+
+            fig_mc.add_vline(x=retirement_age, line_width=2, line_dash="dash",
+                             line_color="#f472b6", annotation_text="Retirement",
+                             annotation_position="top left")
+            fig_mc.update_layout(
+                title="Net Worth — Percentile Bands",
+                xaxis_title="Age", yaxis_title="Total Net Worth ($)",
+                hovermode="x unified", height=420,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_mc, use_container_width=True)
+
+            # ── Final balance histogram ────────────────────────────────────────
+            fig_hist = go.Figure(go.Histogram(
+                x=mc["final_totals"], nbinsx=60,
+                marker_color="#636efa", opacity=0.75,
+                name="Final balance",
+            ))
+            fig_hist.add_vline(
+                x=float(pcts[50][-1]), line_width=2, line_dash="dash",
+                line_color="white", annotation_text="Median",
+                annotation_position="top right",
+            )
+            fig_hist.update_layout(
+                title=f"Distribution of Final Net Worth at Age {int(death_age)}",
+                xaxis_title="Net Worth ($)", yaxis_title="Simulations",
+                height=300, showlegend=False,
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+

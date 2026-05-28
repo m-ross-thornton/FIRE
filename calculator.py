@@ -31,40 +31,16 @@ def calculate_fire(events, brokerage_balance, retirement_balance, retirement_age
     Annual rate compounds each event's monthly amount:
         annual_amount = monthly * 12 * (1 + rate%/100) ^ years_since_start
     """
-    # --- FIRE Number ---
-    # Net annual spending at retirement_age × 25 (4% rule).
-    # Contribution events are excluded — FIRE number is a spending/income concept.
-    fire_expenses = 0.0
-    fire_income = 0.0
-    for ev in events:
-        sa, ea = ev["start_age"], ev["end_age"]
-        if sa <= retirement_age <= ea:
-            yrs = retirement_age - sa
-            amt = ev["monthly_amount"] * 12 * ((1 + ev["annual_rate"] / 100) ** yrs)
-            if ev["type"] == "expense":
-                fire_expenses += amt
-            elif ev["type"] == "income":
-                fire_income += amt
-
-    fire_number = max(0.0, fire_expenses - fire_income) * 25
-
     current_age = current_age if current_age is not None else CURRENT_AGE
     death_age   = death_age   if death_age   is not None else DEATH_AGE
 
     curr_brokerage = float(brokerage_balance)
     curr_retirement = float(retirement_balance)
-    fi_age = None
     success = True
     rows = []
 
     for age in range(current_age, death_age + 1):
         total_nw = curr_brokerage + curr_retirement
-
-        if fi_age is None:
-            if fire_number == 0.0:
-                fi_age = current_age
-            elif total_nw >= fire_number:
-                fi_age = age
 
         # --- Aggregate active events ---
         annual_income = 0.0
@@ -110,7 +86,6 @@ def calculate_fire(events, brokerage_balance, retirement_balance, retirement_age
             "Brokerage": curr_brokerage,
             "Retirement": curr_retirement,
             "Total": total_nw,
-            "Goal": fire_number,
             "Mo Income": annual_income / 12,
             "Mo Expenses": annual_expenses / 12,
             "Mo Ret Contrib": annual_ret_contrib / 12,
@@ -129,7 +104,6 @@ def calculate_fire(events, brokerage_balance, retirement_balance, retirement_age
         else:
             need = -net_budget
             if curr_brokerage >= need:
-                # Brokerage covers the gap
                 curr_brokerage -= need
             else:
                 # Brokerage exhausted → draw remainder from retirement
@@ -145,13 +119,11 @@ def calculate_fire(events, brokerage_balance, retirement_balance, retirement_age
         curr_retirement = max(0.0, curr_retirement)
         curr_brokerage = max(0.0, curr_brokerage)
 
-        if (curr_brokerage + curr_retirement) <= 0 and age < DEATH_AGE:
+        if (curr_brokerage + curr_retirement) <= 0 and age < death_age:
             success = False
 
     return {
         "df": pd.DataFrame(rows),
-        "fire_number": fire_number,
-        "fi_age": fi_age,
         "success": success,
         "final_amount": rows[-1]["Total"] if rows else 0.0,
     }
