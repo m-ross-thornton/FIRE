@@ -20,7 +20,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["cd /home/ubuntu/fire && git pull && docker compose up -d --build"]' \
+            --parameters 'commands=["sudo -u ubuntu bash -c \"cd /home/ubuntu/fire && git pull && docker compose up -d --build\""]' \
             --query "Command.CommandId" \
             --output text)
 
