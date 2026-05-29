@@ -1,18 +1,12 @@
 services:
-  lotto:
-    build: ./lotto
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./lotto/data:/app/data
-    restart: unless-stopped
-    environment:
-      - PYTHONPATH=/app
-
   fire:
-    build: ./FIRE
-    ports:
-      - "8502:8501"
+    build: .
     restart: unless-stopped
     environment:
       - PYTHONPATH=/app
+    networks:
+      - webproxy
+
+networks:
+  webproxy:
+    external: true
